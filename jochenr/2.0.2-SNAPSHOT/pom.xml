@@ -17,12 +17,7 @@
       <plugin>
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>keytool-maven-plugin</artifactId>
-        <version>1.7</version>
-        <configuration>
-            <storetype>PKCS12</storetype>
-            <validity>365</validity>
-            <keyalg>RSA</keyalg>
-        </configuration>
+        <version>2.0.2-SNAPSHOT</version>
         <executions>
           <!-- Step 1: Generate CA key pair -->
           <execution>
@@ -109,6 +104,7 @@
               <alias>cxfca</alias>
               <keystore>${project.build.directory}/cxfca.jks</keystore>
               <storepass>changeit</storepass>
+              <keypass>changeit</keypass>
               <rfc>true</rfc>
               <infile>${project.build.directory}/server.csr</infile>
               <outfile>${project.build.directory}/server.pem</outfile>

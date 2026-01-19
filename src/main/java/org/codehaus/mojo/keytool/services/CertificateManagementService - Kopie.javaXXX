@@ -21,7 +21,6 @@ package org.codehaus.mojo.keytool.services;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
-import javax.security.auth.x500.X500Principal;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -103,53 +102,34 @@ public class CertificateManagementService {
                 char[] actualKeyPassword = (keyPassword != null) ? keyPassword : keystorePassword;
                 Key key = keystore.getKey(alias, actualKeyPassword);
 
-                // Create a new certificate chain with the imported certificate
-                // In a proper implementation, we should validate that the certificate's public key
-                // matches the private key's public key
-
-                // Certificate[] newChain = new Certificate[] {certificate};
-
-                // Find the root CA certificate in the keystore
+                // Find the root CA certificate in the keystore (self-signed)
                 Certificate rootCACert = null;
-
-                if (certificate instanceof java.security.cert.X509Certificate) {
-                    log.info(
-                            "Imported certificate Issuer Name: {}",
-                            ((java.security.cert.X509Certificate) certificate)
-                                    .getIssuerX500Principal()
-                                    .getName());
-
-                    X500Principal issuerPrincipal =
-                            ((java.security.cert.X509Certificate) certificate).getIssuerX500Principal();
-
-                    java.util.Enumeration<String> aliases = keystore.aliases();
-                    while (aliases.hasMoreElements()) {
-                        String tmpAlias = aliases.nextElement();
-                        Certificate cert = keystore.getCertificate(tmpAlias);
-                        if (cert instanceof java.security.cert.X509Certificate) {
-                            java.security.cert.X509Certificate x509 = (java.security.cert.X509Certificate) cert;
-                            if (x509.getSubjectX500Principal().equals(issuerPrincipal)) {
-                                rootCACert = cert;
-                                log.info("Found matching CA certificate with alias: {}", tmpAlias);
-                                break;
-                            }
+                java.util.Enumeration<String> aliases = keystore.aliases();
+                while (aliases.hasMoreElements()) {
+                    String caAlias = aliases.nextElement();
+                    Certificate cert = keystore.getCertificate(caAlias);
+                    if (cert instanceof java.security.cert.X509Certificate) {
+                        java.security.cert.X509Certificate x509 = (java.security.cert.X509Certificate) cert;
+                        System.out.println("Checking certificate with alias: " + caAlias);
+                        if (!(caAlias.equalsIgnoreCase(alias))
+                                && x509.getSubjectX500Principal().equals(x509.getIssuerX500Principal())) {
+                            rootCACert = cert;
+                            break;
                         }
                     }
                 }
-
-                Certificate[] newChain = null;
                 if (rootCACert == null) {
-                    log.warn("No matching CA certificate found in keystore. Importing certificate without CA.");
-                    newChain = new Certificate[] {certificate};
-                } else {
-                    newChain = new Certificate[] {rootCACert, certificate};
+                    throw new KeyStoreException("No self-signed root CA certificate found in keystore");
                 }
+
+                // Build the new chain: [imported certificate, root CA certificate]
+                Certificate[] newChain = new Certificate[] {certificate, rootCACert};
 
                 // Replace the key entry with the new certificate chain
                 keystore.setKeyEntry(alias, key, actualKeyPassword, newChain);
                 saveKeyStore(keystore, keystoreFile, keystorePassword);
 
-                log.info("Certificate reply was imported for key pair alias '{}'", alias);
+                log.info("Certificate reply was imported for key pair alias '{}' with root CA chain", alias);
             } catch (UnrecoverableKeyException e) {
                 throw new KeyStoreException(
                         "Cannot retrieve private key for alias '" + alias
