@@ -86,6 +86,7 @@
             </goals>
             <configuration>
               <alias>localhost</alias>
+			  <!-- <dname>CN=localhost, OU=eng, O=apache.org</dname> -->
               <keystore>${project.build.directory}/truststore-server.jks</keystore>
               <storepass>changeit</storepass>
               <keypass>changeit</keypass>
@@ -106,6 +107,7 @@
               <storepass>changeit</storepass>
               <keypass>changeit</keypass>
               <rfc>true</rfc>
+			  <!-- <dname>CN=localhost, OU=eng, O=apache.org</dname> -->
               <infile>${project.build.directory}/server.csr</infile>
               <outfile>${project.build.directory}/server.pem</outfile>
             </configuration>

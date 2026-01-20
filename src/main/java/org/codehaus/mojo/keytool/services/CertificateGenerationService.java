@@ -21,11 +21,13 @@ package org.codehaus.mojo.keytool.services;
 
 import javax.inject.Named;
 import javax.inject.Singleton;
+import javax.security.auth.x500.X500Principal;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
+import java.io.InputStream;
 import java.math.BigInteger;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
@@ -45,6 +47,7 @@ import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.openssl.PEMParser;
 import org.bouncycastle.openssl.jcajce.JcaPEMWriter;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
@@ -174,13 +177,15 @@ public class CertificateGenerationService {
             // Determine subject DN
             X500Name subject;
             if (dname != null && !dname.isEmpty()) {
-                subject = new X500Name(dname);
+                X500Principal principal = new X500Principal(dname);
+                subject = X500Name.getInstance(principal.getEncoded());
             } else if (cert instanceof X509Certificate) {
-                subject = new X500Name(
-                        ((X509Certificate) cert).getSubjectX500Principal().getName());
+                subject = X500Name.getInstance(
+                        ((X509Certificate) cert).getSubjectX500Principal().getEncoded());
             } else {
                 throw new MojoExecutionException("DN not specified and cannot extract from certificate");
             }
+            log.info("Subject Name in generateCertificateRequest(): {}", subject.toString());
 
             // Build CSR
             PKCS10CertificationRequestBuilder csrBuilder = new JcaPKCS10CertificationRequestBuilder(subject, publicKey);
@@ -245,12 +250,26 @@ public class CertificateGenerationService {
                 throw new MojoExecutionException("Signer certificate not found for alias: " + alias);
             }
 
+            X500Name subject = null;
+            try (InputStream in = new FileInputStream(infile);
+                    PEMParser pemParser = new PEMParser(new java.io.InputStreamReader(in))) {
+                Object obj = pemParser.readObject();
+                if (obj instanceof PKCS10CertificationRequest) {
+                    PKCS10CertificationRequest csr = (PKCS10CertificationRequest) obj;
+                    subject = csr.getSubject();
+                    dname = subject.toString();
+                    log.info("DName from CSR: {}", dname);
+                }
+            }
+            log.info("DName: {}", dname);
+
             // Read CSR from input file
             // For simplicity, generate a basic certificate
             // In production, you'd parse the CSR properly
-            X500Name issuer = new X500Name(
-                    ((X509Certificate) signerCert).getSubjectX500Principal().getName());
-            X500Name subject = dname != null ? new X500Name(dname) : issuer;
+            X500Name issuer = X500Name.getInstance(
+                    ((X509Certificate) signerCert).getSubjectX500Principal().getEncoded());
+            // subject = subject != null ? subject : issuer;
+            log.info("Issuer X500Name: {}", issuer.toString());
 
             BigInteger serial = BigInteger.valueOf(System.currentTimeMillis());
             Date notBefore = new Date();
@@ -292,7 +311,8 @@ public class CertificateGenerationService {
             KeyPair keyPair, String dnName, int validity, String signatureAlgorithm, List<String> exts)
             throws Exception {
 
-        X500Name issuer = new X500Name(dnName);
+        X500Principal principal = new X500Principal(dnName);
+        X500Name issuer = X500Name.getInstance(principal.getEncoded());
         BigInteger serial = BigInteger.valueOf(System.currentTimeMillis());
         Date notBefore = new Date();
         Date notAfter = new Date(notBefore.getTime() + ((long) validity * 24 * 60 * 60 * 1000));

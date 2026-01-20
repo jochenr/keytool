@@ -103,20 +103,21 @@ public class CertificateManagementService {
                 char[] actualKeyPassword = (keyPassword != null) ? keyPassword : keystorePassword;
                 Key key = keystore.getKey(alias, actualKeyPassword);
 
-                // Create a new certificate chain with the imported certificate
-                // In a proper implementation, we should validate that the certificate's public key
-                // matches the private key's public key
-
-                // Certificate[] newChain = new Certificate[] {certificate};
-
-                // Find the root CA certificate in the keystore
-                Certificate rootCACert = null;
+                // Find the root issueing certificate in the keystore
+                Certificate issueingCert = null;
 
                 if (certificate instanceof java.security.cert.X509Certificate) {
+                    log.info("Imported certificate  has alias: {}", alias);
                     log.info(
                             "Imported certificate Issuer Name: {}",
                             ((java.security.cert.X509Certificate) certificate)
                                     .getIssuerX500Principal()
+                                    .getName());
+
+                    log.info(
+                            "Imported certificate Subject Name: {}",
+                            ((java.security.cert.X509Certificate) certificate)
+                                    .getSubjectX500Principal()
                                     .getName());
 
                     X500Principal issuerPrincipal =
@@ -129,21 +130,20 @@ public class CertificateManagementService {
                         if (cert instanceof java.security.cert.X509Certificate) {
                             java.security.cert.X509Certificate x509 = (java.security.cert.X509Certificate) cert;
                             if (x509.getSubjectX500Principal().equals(issuerPrincipal)) {
-                                rootCACert = cert;
+                                issueingCert = cert;
                                 log.info("Found matching CA certificate with alias: {}", tmpAlias);
                                 break;
+                            } else {
+                                log.debug("Certificate with alias '{}' does not match issuer.", tmpAlias);
                             }
                         }
                     }
                 }
 
-                Certificate[] newChain = null;
-                if (rootCACert == null) {
-                    log.warn("No matching CA certificate found in keystore. Importing certificate without CA.");
-                    newChain = new Certificate[] {certificate};
-                } else {
-                    newChain = new Certificate[] {rootCACert, certificate};
-                }
+                // Create a new certificate chain with the imported certificate
+                // In a proper implementation, we should validate that the certificate's public key
+                // matches the private key's public key
+                Certificate[] newChain = new Certificate[] {certificate};
 
                 // Replace the key entry with the new certificate chain
                 keystore.setKeyEntry(alias, key, actualKeyPassword, newChain);
