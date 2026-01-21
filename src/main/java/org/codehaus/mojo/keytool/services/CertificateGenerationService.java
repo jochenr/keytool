@@ -1,24 +1,5 @@
 package org.codehaus.mojo.keytool.services;
 
-/*
- * Licensed to the Apache Software Foundation (ASF) under one
- * or more contributor license agreements.  See the NOTICE file
- * distributed with this work for additional information
- * regarding copyright ownership.  The ASF licenses this file
- * to you under the Apache License, Version 2.0 (the
- * "License"); you may not use this file except in compliance
- * with the License.  You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
-
 import javax.inject.Named;
 import javax.inject.Singleton;
 import javax.security.auth.x500.X500Principal;
@@ -42,6 +23,11 @@ import java.util.List;
 
 import org.apache.maven.plugin.MojoExecutionException;
 import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.GeneralName;
+import org.bouncycastle.asn1.x509.GeneralNames;
+import org.bouncycastle.asn1.x509.KeyUsage;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
@@ -323,9 +309,11 @@ public class CertificateGenerationService {
         // Add extensions if specified
         if (exts != null && !exts.isEmpty()) {
             for (String ext : exts) {
-                log.debug("Processing extension: {}", ext);
+                log.info("Processing extension: {}", ext);
                 // Extension parsing logic would go here
                 // For example: SAN, KeyUsage, etc.
+                parseAndAddExtension(certBuilder, ext);
+                log.info("Parsed and added extension: {}", ext);
             }
         }
 
@@ -380,6 +368,202 @@ public class CertificateGenerationService {
         log.info("Saving keystore to: {}", keystoreFile.getAbsolutePath());
         try (FileOutputStream fos = new FileOutputStream(keystoreFile)) {
             ks.store(fos, storePassword);
+        }
+    }
+
+    private void parseAndAddExtension(X509v3CertificateBuilder certBuilder, String extStr) throws Exception {
+        // First check for '=' which is used in formats like "IssuerAlternativeName=DNS:value"
+        int equalsIndex = extStr.indexOf('=');
+        // Also check for ':' which is used in formats like "bc:c=ca:true"
+        int colonIndex = extStr.indexOf(':');
+
+        String extType;
+        String extValue;
+
+        // Determine which delimiter comes first
+        if (equalsIndex != -1 && (colonIndex == -1 || equalsIndex < colonIndex)) {
+            // Format: "extensionName=value" (e.g., "IssuerAlternativeName=DNS:...")
+            extType = extStr.substring(0, equalsIndex).trim().toLowerCase();
+            extValue = extStr.substring(equalsIndex + 1).trim();
+        } else if (colonIndex != -1) {
+            // Format: "extensionName:segment=value" (e.g., "bc:c=ca:true")
+            extType = extStr.substring(0, colonIndex).trim().toLowerCase();
+            String remaining = extStr.substring(colonIndex + 1).trim();
+
+            int nextEqualsIndex = remaining.indexOf('=');
+            if (nextEqualsIndex != -1) {
+                // Skip the segment between ':' and '=' (like 'c' in 'bc:c=...')
+                extValue = remaining.substring(nextEqualsIndex + 1).trim();
+            } else {
+                extValue = remaining;
+            }
+        } else {
+            log.warn("Invalid extension format: {}", extStr);
+            return;
+        }
+
+        switch (extType) {
+            case "san":
+            case "subjectalternativename":
+                addSubjectAlternativeName(certBuilder, extValue);
+                break;
+            case "ian":
+            case "issueralternativename":
+                addIssuerAlternativeName(certBuilder, extValue);
+                break;
+            case "bc":
+                addBasicConstraints(certBuilder, extValue);
+                break;
+            case "ku":
+            case "keyusage":
+                addKeyUsage(certBuilder, extValue);
+                break;
+            default:
+                log.warn("Unsupported extension type: {}", extType);
+        }
+    }
+
+    private void addSubjectAlternativeName(X509v3CertificateBuilder certBuilder, String value) throws Exception {
+        String[] names = value.split(",");
+        GeneralName[] generalNames = new GeneralName[names.length];
+
+        for (int i = 0; i < names.length; i++) {
+            String[] nameParts = names[i].trim().split(":", 2);
+            if (nameParts.length != 2) {
+                log.warn("Invalid SAN format: {}", names[i]);
+                continue;
+            }
+
+            String type = nameParts[0].trim().toLowerCase();
+            String nameValue = nameParts[1].trim();
+
+            switch (type) {
+                case "dns":
+                    generalNames[i] = new GeneralName(GeneralName.dNSName, nameValue);
+                    break;
+                case "ip":
+                    generalNames[i] = new GeneralName(GeneralName.iPAddress, nameValue);
+                    break;
+                case "email":
+                    generalNames[i] = new GeneralName(GeneralName.rfc822Name, nameValue);
+                    break;
+                case "uri":
+                    generalNames[i] = new GeneralName(GeneralName.uniformResourceIdentifier, nameValue);
+                    break;
+                default:
+                    log.warn("Unsupported SAN type: {}", type);
+            }
+        }
+
+        GeneralNames subjectAltNames = new GeneralNames(generalNames);
+        certBuilder.addExtension(Extension.subjectAlternativeName, false, subjectAltNames);
+        log.info("Added Subject Alternative Name extension");
+    }
+
+    private void addIssuerAlternativeName(X509v3CertificateBuilder certBuilder, String value) throws Exception {
+        String[] names = value.split(",");
+        GeneralName[] generalNames = new GeneralName[names.length];
+
+        for (int i = 0; i < names.length; i++) {
+            String[] nameParts = names[i].trim().split(":", 2);
+            if (nameParts.length != 2) {
+                log.warn("Invalid IAN format: {}", names[i]);
+                continue;
+            }
+
+            String type = nameParts[0].trim().toLowerCase();
+            String nameValue = nameParts[1].trim();
+
+            switch (type) {
+                case "dns":
+                    generalNames[i] = new GeneralName(GeneralName.dNSName, nameValue);
+                    break;
+                case "ip":
+                    generalNames[i] = new GeneralName(GeneralName.iPAddress, nameValue);
+                    break;
+                case "email":
+                    generalNames[i] = new GeneralName(GeneralName.rfc822Name, nameValue);
+                    break;
+                case "uri":
+                    generalNames[i] = new GeneralName(GeneralName.uniformResourceIdentifier, nameValue);
+                    break;
+                default:
+                    log.warn("Unsupported IAN type: {}", type);
+            }
+        }
+
+        GeneralNames issuerAltNames = new GeneralNames(generalNames);
+        certBuilder.addExtension(Extension.issuerAlternativeName, false, issuerAltNames);
+        log.info("Added Issuer Alternative Name extension");
+    }
+
+    private void addBasicConstraints(X509v3CertificateBuilder certBuilder, String value) throws Exception {
+        boolean isCa = false;
+        int pathLen = -1;
+
+        String[] parts = value.split(",");
+        for (String part : parts) {
+            String[] kv = part.trim().split(":");
+            if (kv.length == 2) {
+                String key = kv[0].trim().toLowerCase();
+                String val = kv[1].trim();
+
+                if ("ca".equals(key)) {
+                    isCa = Boolean.parseBoolean(val);
+                } else if ("pathlen".equals(key)) {
+                    pathLen = Integer.parseInt(val);
+                }
+            }
+        }
+
+        BasicConstraints basicConstraints = pathLen >= 0 ? new BasicConstraints(pathLen) : new BasicConstraints(isCa);
+
+        certBuilder.addExtension(Extension.basicConstraints, true, basicConstraints);
+        log.info("Added Basic Constraints extension: CA={}, pathLen={}", isCa, pathLen);
+    }
+
+    private void addKeyUsage(X509v3CertificateBuilder certBuilder, String value) throws Exception {
+        int usage = 0;
+        String[] usages = value.split(",");
+
+        for (String u : usages) {
+            String usageType = u.trim().toLowerCase();
+            switch (usageType) {
+                case "digitalsignature":
+                    usage |= KeyUsage.digitalSignature;
+                    break;
+                case "nonrepudiation":
+                    usage |= KeyUsage.nonRepudiation;
+                    break;
+                case "keyencipherment":
+                    usage |= KeyUsage.keyEncipherment;
+                    break;
+                case "dataencipherment":
+                    usage |= KeyUsage.dataEncipherment;
+                    break;
+                case "keyagreement":
+                    usage |= KeyUsage.keyAgreement;
+                    break;
+                case "keycertsign":
+                    usage |= KeyUsage.keyCertSign;
+                    break;
+                case "crlsign":
+                    usage |= KeyUsage.cRLSign;
+                    break;
+                case "encipheronly":
+                    usage |= KeyUsage.encipherOnly;
+                    break;
+                case "decipheronly":
+                    usage |= KeyUsage.decipherOnly;
+                    break;
+                default:
+                    log.warn("Unknown key usage: {}", usageType);
+            }
+        }
+
+        if (usage != 0) {
+            certBuilder.addExtension(Extension.keyUsage, true, new KeyUsage(usage));
+            log.info("Added Key Usage extension: {}", value);
         }
     }
 }

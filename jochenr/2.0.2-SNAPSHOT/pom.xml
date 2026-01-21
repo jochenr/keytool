@@ -68,7 +68,7 @@
               <alias>localhost</alias>
               <dname>CN=localhost, OU=eng, O=apache.org</dname>
               <exts>
-                <ext>bc:c=ca:true,pathlen:2147483647</ext>
+                <!-- <ext>bc:c=ca:true,pathlen:2147483647</ext> -->
                 <ext>IssuerAlternativeName=DNS:NOT-FOR-PRODUCTION-USE</ext>
               </exts>
               <keystore>${project.build.directory}/truststore-server.jks</keystore>
